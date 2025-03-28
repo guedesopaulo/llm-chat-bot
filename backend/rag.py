@@ -1,72 +1,49 @@
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS
-from .models.gemma import load_gemma_chat
+from langchain.memory import ConversationBufferMemory
+from .models.bedrock import load_bedrock_chat
+# ou use: from .models.gemma import load_gemma_chat
 
-import torch
+# === SETUP ===
+processor, model = load_bedrock_chat()
+memory = ConversationBufferMemory(return_messages=True)
 
-# Carrega o processor e o modelo LLM
-processor, model = load_gemma_chat()
-
-# Monta o prompt estruturado no estilo chat
-def build_messages(context: str, question: str):
-    return [
-        {
-            "role": "system",
-            "content": [{"type": "text", "text": "You are a helpful assistant."}]
-        },
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": f"{context}\n\nQuestion: {question}"}]
-        }
-    ]
-
-# Busca os documentos relevantes
+# === RETRIEVAL ===
 def retrieve_context(query: str, k: int = 3):
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-MiniLM-L6-v2")
     db = FAISS.load_local("vector_store/index", embeddings, allow_dangerous_deserialization=True)
     docs = db.similarity_search(query, k=k)
     return "\n".join(doc.page_content for doc in docs)
 
+# === GERAÇÃO COM MEMÓRIA ===
 def generate_response(context: str, question: str):
-    messages = [
-        {
-            "role": "system",
-            "content": [{"type": "text", "text": "You are a helpful assistant."}]
-        },
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": f"{context}\n\nQuestion: {question}"}]
-        }
-    ]
+    # Adiciona a pergunta atual na memória
+    memory.chat_memory.add_user_message(f"{context}\n\nQuestion: {question}")
 
-    inputs = processor.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        tokenize=True,
-        return_dict=True,
-        return_tensors="pt"
-    )
+    # Pega histórico formatado
+    chat_history = memory.chat_memory.messages
 
-    inputs = inputs.to(model.device, dtype=torch.bfloat16)
-    input_len = inputs["input_ids"].shape[-1]
+    # Monta o prompt no formato usado pelo modelo
+    messages = [{"role": "system", "content": [{"type": "text", "text": "Você é um assistente de vendas da nossa empresa, seja gentil e responda como um humano. Foque em responder sobre a pergunta. Evite alucinações fora da pergunta"}]}]
+    for m in chat_history:
+        role = "user" if m.type == "human" else "assistant"
+        messages.append({
+            "role": role,
+            "content": [{"type": "text", "text": m.content}]
+        })
 
-    with torch.inference_mode():
-        try:
-            output = model.generate(
-                **inputs,
-                max_new_tokens=256,
-                do_sample=False
-            )
-            generated = output[0][input_len:]
-            decoded = processor.decode(generated, skip_special_tokens=True)
-            print("🧾 Resposta do modelo:", decoded)
-            return decoded.strip()
-        except Exception as e:
-            print("⚠️ Erro ao gerar resposta:", e)
-            return "Houve um erro ao gerar a resposta."
+    prompt = processor(messages)
 
+    try:
+        response = model.invoke(prompt)
+        memory.chat_memory.add_ai_message(response)
+        print("🧾 Resposta do modelo:", response)
+        return response.strip()
+    except Exception as e:
+        print("⚠️ Erro ao gerar resposta:", e)
+        return "Houve um erro ao gerar a resposta."
 
-# Endpoint principal chamado pelo app.py
+# === FUNÇÃO PRINCIPAL DO FASTAPI ===
 def answer_question(query: str):
     context = retrieve_context(query)
     return generate_response(context, query)
