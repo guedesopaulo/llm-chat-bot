@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from .rag import answer_question
+from backend.rag.rag_chain import answer_question
 
 app = FastAPI()
 
