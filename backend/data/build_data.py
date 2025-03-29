@@ -10,7 +10,7 @@ def build_store(pdf_path: str, output_dir: str = "vector_store/index"):
     pages = loader.load()
 
     print("✂️ Splitting into chunks...")
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=128)
     docs = splitter.split_documents(pages)
 
     print("🧠 Creating embeddings...")
