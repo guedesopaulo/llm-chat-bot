@@ -7,8 +7,8 @@ from llama_index.core.node_parser import SentenceSplitter
 import faiss
 
 # Configurações personalizáveis
-CHUNK_SIZE = 1024
-CHUNK_OVERLAP = 200
+CHUNK_SIZE = 2048
+CHUNK_OVERLAP = 512
 TOP_K = 4
 INDEX_PATH = "backend/data/index"
 
@@ -33,7 +33,7 @@ Settings.llm = llm
 Settings.embed_model = embedding_model
 
 # 8. Configurar memória de conversação
-memory = ChatMemoryBuffer.from_defaults(token_limit=2048)
+memory = ChatMemoryBuffer.from_defaults(token_limit=512)
 
 SYSTEM_PROMPT = (
     "Você é um agente especializado em cafés especiais da loja Serenatto.\n\n"
@@ -46,7 +46,7 @@ SYSTEM_PROMPT = (
     "Você verá a seguir o histórico da conversa com o cliente. Use isso para manter o contexto da conversa, "
     "mas sempre responda à nova pergunta diretamente.\n\n"
     "=== NOVA PERGUNTA ===\n"
-    "Responda de forma objetiva, educada e clara com base no histórico e nos documentos disponíveis."
+    "Responda de forma objetiva, educada e clara com base no histórico e nos documentos disponíveis, parece um ser humano."
 )
 
 chat_engine = index.as_chat_engine(
