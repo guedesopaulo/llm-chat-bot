@@ -10,7 +10,7 @@ import os
 documents = SimpleDirectoryReader("backend/data/docs").load_data()
 
 # 2. Configurar o modelo de linguagem (LLM) usando o Ollama com o modelo Llama 3.1
-llm = Ollama(model="gemma:12b", request_timeout=30.0)
+llm = Ollama(model="gemma3:12b", request_timeout=30.0)
 
 # 3. Configurar o modelo de embeddings usando o HuggingFace
 embedding_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")

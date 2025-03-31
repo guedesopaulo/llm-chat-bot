@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from rag_chain_memory import answer_question, get_memory
+from backend.rag_chain import answer_question, get_memory
 
 app = FastAPI()
 
