@@ -3,62 +3,88 @@ from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.ollama import Ollama
 from llama_index.vector_stores.faiss import FaissVectorStore
+from llama_index.core.node_parser import SentenceSplitter
 import faiss
-import os
 
-# 1. Carregar os documentos da sua loja de cafés
+# Configurações personalizáveis
+CHUNK_SIZE = 1024
+CHUNK_OVERLAP = 200
+TOP_K = 4
+INDEX_PATH = "backend/data/index"
+
+splitter = SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
 documents = SimpleDirectoryReader("backend/data/docs").load_data()
+nodes = splitter.get_nodes_from_documents(documents)
 
-# 2. Configurar o modelo de linguagem (LLM) usando o Ollama com o modelo Llama 3.1
 llm = Ollama(model="gemma3:12b", request_timeout=30.0)
 
-# 3. Configurar o modelo de embeddings usando o HuggingFace
-embedding_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+embedding_model = HuggingFaceEmbedding(model_name="intfloat/multilingual-e5-large")
 
-# 4. Criar o índice FAISS e o vetor store
-dimension = 384  # Dimensão do modelo de embeddings
+dimension = 1024  
 faiss_index = faiss.IndexFlatL2(dimension)
 vector_store = FaissVectorStore(faiss_index=faiss_index)
 
-# 5. Criar contexto de armazenamento e indexar os documentos
 storage_context = StorageContext.from_defaults(vector_store=vector_store)
-index = VectorStoreIndex.from_documents(
-    documents, embed_model=embedding_model, storage_context=storage_context
-)
+index = VectorStoreIndex(nodes, embed_model=embedding_model, storage_context=storage_context)
 
-# 6. Salvar o índice completo (inclui textos e índice FAISS)
-index.storage_context.persist("backend/data/index")
+index.storage_context.persist(INDEX_PATH)
 
-# 7. Configurar o contexto global
 Settings.llm = llm
 Settings.embed_model = embedding_model
 
 # 8. Configurar memória de conversação
 memory = ChatMemoryBuffer.from_defaults(token_limit=2048)
 
-# 9. Criar o chat engine com prompt customizado
+SYSTEM_PROMPT = (
+    "Você é um agente especializado em cafés especiais da loja Serenatto.\n\n"
+    "=== CONTEXTO ===\n"
+    "As informações que você tem acesso vêm de documentos da empresa.\n"
+    "Use-as para responder de forma precisa, educada e profissional.\n"
+    "Se não souber a resposta, diga que não sabe.\n"
+    "Perguntas sobre temas fora do assunto ou sensíveis devem ser respondidas como 'isso foge ao assunto da loja'.\n\n"
+    "=== HISTÓRICO DA CONVERSA ===\n"
+    "Você verá a seguir o histórico da conversa com o cliente. Use isso para manter o contexto da conversa, "
+    "mas sempre responda à nova pergunta diretamente.\n\n"
+    "=== NOVA PERGUNTA ===\n"
+    "Responda de forma objetiva, educada e clara com base no histórico e nos documentos disponíveis."
+)
+
 chat_engine = index.as_chat_engine(
     chat_mode="context",
     memory=memory,
-    system_prompt=(
-        "Você é um agente especializado em cafés especiais da loja Serenatto.\n\n"
-        "=== CONTEXTO ===\n"
-        "As informações que você tem acesso vêm de documentos da empresa.\n"
-        "Use-as para responder de forma precisa, educada e profissional.\n"
-        "Se não souber a resposta, diga que não sabe.\n"
-        "Perguntas sobre temas fora do assunto ou sensíveis devem ser respondidas como 'isso foge ao assunto da loja'.\n\n"
-        "=== HISTÓRICO DA CONVERSA ===\n"
-        "Você verá a seguir o histórico da conversa com o cliente. Use isso para manter o contexto da conversa, "
-        "mas sempre responda à nova pergunta diretamente.\n\n"
-        "=== NOVA PERGUNTA ===\n"
-        "Responda de forma objetiva, educada e clara com base no histórico e nos documentos disponíveis."
-    )
+    system_prompt=SYSTEM_PROMPT,
+    retriever_kwargs={"similarity_top_k": TOP_K}
 )
 
-# 10. Funções principais de resposta e memória
 def answer_question(question: str) -> str:
     response = chat_engine.chat(question)
     return response.response
 
 def get_memory():
     return memory.get_all()
+
+def get_prompt(question: str) -> str:
+    retriever = index.as_retriever(similarity_top_k=TOP_K)
+    retrieved_nodes = retriever.retrieve(question)
+    context_str = "\n\n".join([node.get_content() for node in retrieved_nodes])
+
+    chat_history = memory.get_all()
+    history_str = "\n".join(
+        [f"user: {msg.content}" if msg.role == "user" else f"assistant: {msg.content}"
+         for msg in chat_history]
+    )
+
+    full_prompt = f"""
+    {SYSTEM_PROMPT}
+
+    === CONTEXTO ===
+    {context_str}
+
+    === HISTÓRICO DA CONVERSA ===
+    {history_str}
+
+    === NOVA PERGUNTA ===
+    {question}
+    """.strip()
+
+    return full_prompt
